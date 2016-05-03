@@ -42,7 +42,10 @@ def CalculatePredict(sbs,day,daysModelRegression):
     
     #Calculamos los pesos
     for e in errors: 
-        weights.append(k/e) 
+        try:
+            weights.append(k/e) 
+        except ZeroDivisionError:
+            weights.append(1)
     
     #Calculamos el tipo de cambio predecido
     tcPredict = sum([a*b for a, b in zip(weights, predictions)])     
@@ -91,9 +94,8 @@ tableError = {'error': [], 'a1': [], 'a2': [], 'a3': [], 'a4': [], 'real': [], '
 #Recorremos cada uno de los valores de la data llamada 'sbs'.
 #En este caso solo leeremos 50 valores, para realizar pruebas.
 for i in range (0,50):
-    day = day - i
-    tcReal = sbs['SBS'][day]
-    rowError = CalculateError(sbs,day,daysModelRegression,tcReal)    
+    tcReal = sbs['SBS'][day-i]
+    rowError = CalculateError(sbs,day-i,daysModelRegression,tcReal)    
     for key in rowError.keys():
         tableError[key].append(rowError[key][0])
     
