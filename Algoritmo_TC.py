@@ -45,7 +45,7 @@ def CalculatePredict(sbs,day,daysModelRegression):
         try:
             weights.append(k/e) 
         except ZeroDivisionError:
-            weights.append(1)
+            weights.append(1)                        
     
     #Calculamos el tipo de cambio predecido
     tcPredict = sum([a*b for a, b in zip(weights, predictions)])     
@@ -68,19 +68,42 @@ def ComputeCost(theta, coefficients):
     return coefficients[0] + coefficients[1]*theta[0] + coefficients[2]*theta[1] + coefficients[3]*theta[2] + coefficients[4]*theta[3] 
     
 def GradientDescent(theta, alpha, numIters, coefficients):
-    JHistory = []    
+    JHistory = [] 
+    iteracion = numIters
     for i in range(1,numIters):
-        JHistory.append(ComputeCost(theta,coefficients))
-        auxTheta = [0,0,0,0]
-        auxTheta[0] = theta[0] - alpha * coefficients[1]
-        auxTheta[1] = theta[1] - alpha * coefficients[2]
-        auxTheta[2] = theta[2] - alpha * coefficients[3]
-        auxTheta[3] = theta[3] - alpha * coefficients[4]
-        theta[0] = auxTheta[0]
-        theta[1] = auxTheta[1]
-        theta[2] = auxTheta[2]
-        theta[3] = auxTheta[3]
-    return (theta,JHistory)
+        if ComputeCost(theta,coefficients)>=0:        
+            JHistory.append(ComputeCost(theta,coefficients))
+            auxTheta = [0,0,0,0]
+            auxTheta[0] = theta[0] - alpha * coefficients[1]
+            auxTheta[1] = theta[1] - alpha * coefficients[2]
+            auxTheta[2] = theta[2] - alpha * coefficients[3]
+            auxTheta[3] = theta[3] - alpha * coefficients[4]
+            theta[0] = auxTheta[0]
+            theta[1] = auxTheta[1]
+            theta[2] = auxTheta[2]
+            theta[3] = auxTheta[3]
+        else:
+            iteracion = i            
+            break
+    return (iteracion,theta,JHistory)
+
+def CalculateWeightsHistoric(tableError):
+    avgWeights = []
+    dataError = graphlab.SFrame(tableError) #Convertimos a SFrame la tabla de errores
+    avgWeights.append(float(sum(dataError['a1']))/len(dataError) if len(dataError) > 0 else float('nan'))
+    avgWeights.append(float(sum(dataError['a2']))/len(dataError) if len(dataError) > 0 else float('nan'))
+    avgWeights.append(float(sum(dataError['a3']))/len(dataError) if len(dataError) > 0 else float('nan'))
+    avgWeights.append(float(sum(dataError['a4']))/len(dataError) if len(dataError) > 0 else float('nan'))
+    return avgWeights
+
+def CalculateDayPredictNewModel(sbs,daysModelRegression,dayModel,weights,dayPredict):
+    predictions = []    
+    for i in daysModelRegression:
+        rang = sbs[dayModel - i : dayModel]
+        model = graphlab.linear_regression.create(rang, target='SBS', features=['CodigoFecha'],validation_set=None)
+        predictions.append(model.predict(graphlab.SFrame(dayPredict))[0])
+    return sum([a*b for a, b in zip(weights, predictions)])
+
 
 """***********************************************************
 Programa Principal
@@ -129,8 +152,8 @@ alpha = 0.01
 numIters = 600
 
 InitialJHistory = ComputeCost(theta, coefficients)
-theta, JHistory = GradientDescent(theta, alpha, numIters, coefficients)
-plt.plot(range(1,600),JHistory,'.')
+iteracion, theta, JHistory = GradientDescent(theta, alpha, numIters, coefficients)
+#plt.plot(range(1,iteracion),JHistory,'.')
 
 """
 #Calculamos un factor tal que los theta's encontrados sumen 1.
@@ -156,4 +179,51 @@ for i in daysModelRegression:
 tcDayPredictMetodo1 = sum([a*b for a, b in zip(avgWeights, predictions)])   
 tcDayPredictMetodo2 = sum([a*b for a, b in zip(theta, predictions)])/sum(theta)
 
+
+"""*************************************
+Calculo de predicciones del tipo de cambio, dado un periodo por el usuario definido en la variable daysPredict. 
+Se usa el metodo 1 que calcula el promedio de las ponderaciones
+
+Estos son los dos valores que debes modificar para probar el modelo de prediccion vs los valores reales. 
+Probar con dias de meses pasados. Si prueba con el dia actual = len(sbs) entonces en el grafico los valores reales seran cero,
+ya que no existe data real del futuro. Solo se mostrar el grafico de las predicciones."""
+
+size = len(sbs) #El maximo valor permitido es len(sbs). Es el dia inicial desde el cual se desea calcular las predicciones
+daysPredict = 90 #Cantidad de dias a predecir
+
+"""****************************************************************************************************************************"""
+"""****************************************************************************************************************************"""
+
+lastDay = size - 1
+copy = graphlab.SFrame.copy(sbs)
+copy = copy[0:size]
+weights = []
+newPredictions = {'CodigoFecha': [], 'TcDayPredict': []}
+for x in range(1,daysPredict+1):
+    dayPredict = {'CodigoFecha' : [lastDay + x]} #Dia a predecir el ultimo dia + 1
+    weights = CalculateWeightsHistoric(tableError)
+    dayModel = lastDay + x - 1 #El modelo de prediccion de cada nuevo dia se realizar con el modelo del dia anterior
+    tcDayPredict = CalculateDayPredictNewModel(copy,daysModelRegression,dayModel,weights,dayPredict)
+    newPredictions['CodigoFecha'].append(lastDay + x + 1)
+    newPredictions['TcDayPredict'].append(tcDayPredict)    
+    copy = copy.append(graphlab.SFrame({'Fecha': ['2016'], 'CodigoFecha': [lastDay + x + 1], 'SBS': [tcDayPredict]}))
+    rowError = CalculateError(copy,lastDay + x,daysModelRegression,tcDayPredict)
+    for key in rowError.keys():
+        tableError[key].append(rowError[key][0])
+
+aux = sbs['SBS'][lastDay+1:lastDay+daysPredict+1]
+if len(aux) == 0:
+    aux = graphlab.SArray([])
+if len(aux) < daysPredict:
+    for x in range(len(aux)+1,daysPredict+1):
+        aux = aux.append(graphlab.SArray([0.0]))
+        
+plt.gca().set_color_cycle(['red', 'blue'])
+plt.plot(range(1,daysPredict+1),newPredictions['TcDayPredict'],'.')
+plt.plot(range(1,daysPredict+1),aux,'.')
+plt.legend(['Prediccion', 'Real'], loc='lower right')
+plt.show()
+
+rtn = graphlab.SFrame(newPredictions)
+rtn.save('predictions.csv', format='csv')
 
